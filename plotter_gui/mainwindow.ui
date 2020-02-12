@@ -853,6 +853,7 @@
      <addaction name="actionClearRecentLayout"/>
     </widget>
     <addaction name="actionLoadData"/>
+    <addaction name="actionLoadDatabase"/>
     <addaction name="menuRecentData"/>
     <addaction name="actionLoadDummyData"/>
     <addaction name="separator"/>
@@ -904,7 +905,6 @@
     </property>
     <addaction name="separator"/>
     <addaction name="actionFunctionEditor"/>
-    <addaction name="actionFullscreen"/>
     <addaction name="actionSaveAllPlotTabs"/>
    </widget>
    <widget class="QMenu" name="menuData">
@@ -984,17 +984,6 @@
     <string>Ctrl+Shift+C</string>
    </property>
   </action>
-  <!--action name="actionFullscreen">
-   <property name="text">
-    <string>Fullscreen mode</string>
-   </property>
-   <property name="toolTip">
-    <string>Maximize plots [F10]</string>
-   </property>
-   <property name="shortcut">
-    <string>F10</string>
-   </property>
-  </action-->
   <action name="actionSaveAllPlotTabs">
    <property name="text">
     <string>Save all plot tabs as images</string>
@@ -1066,6 +1055,14 @@
    </property>
    <property name="text">
     <string>Share the love</string>
+   </property>
+  </action>
+  <action name="actionLoadDatabase">
+   <property name="enabled">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Load Database</string>
    </property>
   </action>
  </widget>

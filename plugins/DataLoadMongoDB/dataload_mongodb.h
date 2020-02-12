@@ -3,7 +3,7 @@
 
 #include <QObject>
 #include <QtPlugin>
-#include "PlotJuggler/dataloader_base.h"
+#include "PlotJuggler/database_loader_base.h"
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
 
@@ -14,17 +14,17 @@
 
 
 
-class  DataLoadMongoDB: public DataLoader
+class  DataLoadMongoDB: public DatabaseLoader
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "com.icarustechnology.PlotJuggler.DataLoader" "../dataloader.json")
-    Q_INTERFACES(DataLoader)
+    Q_PLUGIN_METADATA(IID "com.icarustechnology.PlotJuggler.DatabaseLoader" "../databaseloader.json")
+    Q_INTERFACES(DatabaseLoader)
 
 public:
     DataLoadMongoDB();
-    virtual const std::vector<const char*>& compatibleFileExtensions() const override;
 
-    virtual bool readDataFromFile(FileLoadInfo* fileload_info, PlotDataMapRef& destination) override;
+    virtual bool readDataFromDatabase(DBLoadInfo* dbload_info, PlotDataMapRef& destination) override;
+    virtual std::vector<std::string> getDatabaseNames() override;
 
     virtual ~DataLoadMongoDB();
 
@@ -35,7 +35,7 @@ public:
     virtual bool xmlLoadState(const QDomElement &parent_element ) override;
 
 protected:
-    std::vector<std::string> getDBInfo(QFile *file, std::string &name);
+    std::vector<std::string> getDBInfo(const std::string &name);
     std::vector<std::string> getVariableNames(const Json::Value &root, const std::string &root_name);
     void getData(const Json::Value &root, const std::string &root_name, double timestamp, std::map<std::string, PlotData*> &plot_map);
     mongocxx::instance instance_;

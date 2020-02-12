@@ -21,6 +21,7 @@
 #include "PlotJuggler/dataloader_base.h"
 #include "PlotJuggler/statepublisher_base.h"
 #include "PlotJuggler/datastreamer_base.h"
+#include "PlotJuggler/database_loader_base.h"
 #include "transforms/custom_function.h"
 
 #include "ui_mainwindow.h"
@@ -37,6 +38,7 @@ public:
     bool loadLayoutFromFile(QString filename);
     bool loadDataFromFiles(QStringList filenames );
     bool loadDataFromFile(const FileLoadInfo &info);
+    bool loadDataFromDatabase(QString dbname);
     QString styleDirectory() const;
 
 public slots:
@@ -106,6 +108,7 @@ private:
     std::map<QString,DataLoader*>      _data_loader;
     std::map<QString,StatePublisher*>  _state_publisher;
     std::map<QString,DataStreamer*>    _data_streamer;
+    std::map<QString,DatabaseLoader*>    _database_loader;
     DataStreamer* _current_streamer;
 
     std::deque<QDomDocument> _undo_states;
@@ -181,6 +184,7 @@ signals:
 
 public slots:
     void on_actionLoadData_triggered();
+    void on_actionLoadDatabase_triggered();
     void on_actionLoadLayout_triggered();
     void on_actionSaveLayout_triggered();
     void on_actionLoadDummyData_triggered();

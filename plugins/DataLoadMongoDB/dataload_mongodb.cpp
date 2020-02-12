@@ -15,18 +15,24 @@
 
 DataLoadMongoDB::DataLoadMongoDB()
 {
-    _extensions.push_back( "mongo");
 }
 
-const std::vector<const char*> &DataLoadMongoDB::compatibleFileExtensions() const
+
+std::vector<std::string> DataLoadMongoDB::getDatabaseNames()
 {
-    return _extensions;
+    std::vector<std::string> db_names;
+    mongocxx::client db_client{mongocxx::uri{}};
+    auto cursor = db_client.list_databases();
+    for (auto db : cursor)
+    {
+        std::string db_name = db["name"].get_utf8().value.to_string();
+        db_names.push_back(db_name);
+    }
+    return db_names;
 }
 
-std::vector<std::string> DataLoadMongoDB::getDBInfo(QFile *file, std::string &db_name)
+std::vector<std::string> DataLoadMongoDB::getDBInfo(const std::string &db_name)
 {
-    QTextStream inA(file);
-    db_name = inA.readLine().toStdString();
     std::vector<std::string> collection_strings;
 
     mongocxx::client db_client{mongocxx::uri{}};
@@ -130,29 +136,14 @@ void DataLoadMongoDB::getData(const Json::Value &root, const std::string &root_n
     }
 }
 
-bool DataLoadMongoDB::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_data)
+bool DataLoadMongoDB::readDataFromDatabase(DBLoadInfo* info, PlotDataMapRef& plot_data)
 {
     bool use_provided_configuration = false;
 
-    if( info->plugin_config.hasChildNodes() )
-    {
-        use_provided_configuration = true;
-        xmlLoadState( info->plugin_config.firstChildElement() );
-    }
-
-    QFile file( info->filename );
-    file.open(QFile::ReadOnly);
-
     // get list of collections in the DB
     std::vector<std::string> collections;
-    std::string db_name;
-    collections = getDBInfo(&file, db_name);
-    file.close();
-
-    if( info->plugin_config.hasChildNodes() )
-    {
-        xmlLoadState( info->plugin_config.firstChildElement() );
-    }
+    std::string db_name = info->dbname.toStdString();
+    collections = getDBInfo(db_name);
 
     if( ! info->selected_datasources.empty() )
     {
@@ -220,7 +211,15 @@ bool DataLoadMongoDB::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_
             std::stringstream sstr(json_doc);
             Json::Value json;
             sstr >> json;
-            double timestamp = json["timestamp"].asDouble();
+            double timestamp = 0;
+            if (json["timestamp"].isNumeric())
+            {
+                timestamp = json["timestamp"].asDouble();
+            }
+            else if (json["timestamp"]["$date"].isNumeric())
+            {
+                timestamp = (double)(json["timestamp"]["$date"].asLargestUInt()) / 1000.0;
+            }
 
             // will traverse the json tree for this document
             // and populate the data
@@ -249,25 +248,12 @@ DataLoadMongoDB::~DataLoadMongoDB()
 
 bool DataLoadMongoDB::xmlSaveState(QDomDocument &doc, QDomElement &parent_element) const
 {
-    QDomElement elem = doc.createElement("default");
-    elem.setAttribute("time_axis", _default_time_axis.c_str() );
-
-    parent_element.appendChild( elem );
     return true;
 }
 
 bool DataLoadMongoDB::xmlLoadState(const QDomElement &parent_element)
 {
-    QDomElement elem = parent_element.firstChildElement( "default" );
-    if( !elem.isNull()    )
-    {
-        if( elem.hasAttribute("time_axis") )
-        {
-            _default_time_axis = elem.attribute("time_axis").toStdString();
-            return true;
-        }
-    }
-    return false;
+    return true;
 }
 
 void DataLoadMongoDB::saveDefaultSettings()

@@ -405,11 +405,13 @@ void MainWindow::initializePlugins(QString directory_name)
             DataLoader *loader        = qobject_cast<DataLoader *>(plugin);
             StatePublisher *publisher = qobject_cast<StatePublisher *>(plugin);
             DataStreamer *streamer    =  qobject_cast<DataStreamer *>(plugin);
+            DatabaseLoader *dbloader  = qobject_cast<DatabaseLoader *>(plugin);
 
             QString plugin_name;
             if( loader )    plugin_name = loader->name();
             if( publisher ) plugin_name = publisher->name();
             if( streamer )  plugin_name = streamer->name();
+            if( dbloader )  plugin_name = dbloader->name();
 
             if( loaded_plugins.find(plugin_name) == loaded_plugins.end())
             {
@@ -492,6 +494,11 @@ void MainWindow::initializePlugins(QString directory_name)
                     connect(streamer, &DataStreamer::clearBuffers,
                             this, &MainWindow::on_actionClearBuffer_triggered );
                 }
+            }
+            else if (dbloader)
+            {
+                qDebug() << filename << ": is a DatabaseLoader plugin";
+                _database_loader.insert(std::make_pair(plugin_name, dbloader) );
             }
         }
         else{
@@ -1191,6 +1198,34 @@ bool MainWindow::loadDataFromFile(const FileLoadInfo& info)
     return true;
 }
 
+bool MainWindow::loadDataFromDatabase(QString dbname)
+{
+    ui->pushButtonPlay->setChecked(false);
+
+    DBLoadInfo info;
+    info.dbname = dbname;
+    DatabaseLoader *dbloader = _database_loader.begin()->second;
+    try
+    {
+        PlotDataMapRef mapped_data;
+        if( dbloader->readDataFromDatabase(&info, mapped_data))
+        {
+            importPlotDataMap(mapped_data, true);
+        }
+    }
+    catch(std::exception &ex)
+    {
+        QMessageBox::warning(this, tr("Exception from the plugin"),
+                             tr("The plugin [%1] thrown the following exception: \n\n %3\n")
+                             .arg(dbloader->name()).arg(ex.what()) );
+        return false;
+    }
+    _curvelist_widget->updateFilter();
+    updateDataAndReplot( true );
+    ui->timeSlider->setRealValue( ui->timeSlider->getMinimum() );
+    return true;
+}
+
 QString MainWindow::styleDirectory() const
 {
     return _style_directory;
@@ -1318,6 +1353,10 @@ void MainWindow::loadPluginState(const QDomElement& root)
                 publisher->setEnabled(true);
             }
         }
+        if( _database_loader.find(plugin_name) != _database_loader.end() )
+        {
+            _database_loader[plugin_name]->xmlLoadState( plugin_elem );
+        }
     }
 }
 
@@ -1338,6 +1377,17 @@ QDomElement MainWindow::savePluginState(QDomDocument& doc)
     for (auto& it: _data_loader)
     {
         const DataLoader* dataloader = it.second;
+        QDomElement plugin_elem =  dataloader->xmlSaveState(doc);
+        if( !plugin_elem.isNull() )
+        {
+            list_plugins.appendChild( plugin_elem );
+            CheckValidFormat( it.first, plugin_elem );
+        }
+    }
+
+    for (auto& it: _database_loader)
+    {
+        const DatabaseLoader* dataloader = it.second;
         QDomElement plugin_elem =  dataloader->xmlSaveState(doc);
         if( !plugin_elem.isNull() )
         {
@@ -2092,6 +2142,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     for(auto& it : _data_loader ) { delete it.second; }
     for(auto& it : _state_publisher ) { delete it.second; }
     for(auto& it : _data_streamer ) { delete it.second; }
+    for(auto& it : _database_loader ) { delete it.second; }
 }
 
 void MainWindow::on_addMathPlot(const std::string& linked_name)
@@ -2414,6 +2465,37 @@ void MainWindow::on_actionLoadData_triggered()
     {
         updateRecentDataMenu(fileNames);
     }
+}
+
+void MainWindow::on_actionLoadDatabase_triggered()
+{
+    if( _database_loader.empty())
+    {
+        QMessageBox::warning(this, tr("Warning"),
+                             tr("No plugin was loaded to process a data file\n") );
+        return;
+    }
+
+    QInputDialog qDialog(this);
+
+
+    QString dbname;
+    QStringList items;
+    std::vector<std::string> db_names = _database_loader.begin()->second->getDatabaseNames();
+    for (int i = 0; i < db_names.size(); i++)
+    {
+        items << QString::fromStdString(db_names[i]);
+    }
+
+    qDialog.setOptions(QInputDialog::UseListViewForComboBoxItems);
+    qDialog.setComboBoxItems(items);
+    qDialog.setWindowTitle("Choose database");
+
+    if (qDialog.exec())
+    {
+        dbname = qDialog.textValue();
+    }
+    loadDataFromDatabase(dbname);
 }
 
 void MainWindow::on_actionLoadLayout_triggered()
