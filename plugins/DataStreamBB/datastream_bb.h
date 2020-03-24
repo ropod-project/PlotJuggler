@@ -49,7 +49,7 @@ public:
 
     void queryLatestVariableValuesFromBB();
 
-    void recvMsgCallback(ZyreMsgContent *msgContent);
+    void zyreMessageReceptionCallback(ZyreMsgContent *msgContent);
 
     void initializeDataMap();
 
@@ -61,7 +61,8 @@ private:
     Json::CharReaderBuilder json_builder;
     std::string myUUID;
     QStringList BBVariableList;
-    std::map<std::string, float> BBVariableValues;
+    std::map<std::string, std::pair<double, double>> BBVariableData;
+    std::map<std::string, std::pair<double, double>> PreviousBBVariableData;
 
     PlotDataMapRef* _destination_data;
 

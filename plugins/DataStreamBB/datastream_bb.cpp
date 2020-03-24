@@ -60,6 +60,8 @@ DataStreamBB::DataStreamBB():
     this->setHeaders(headers);
 
     this->joinGroup("ROPOD");
+
+    std::cout.precision(20);
 }
 
 bool DataStreamBB::start(QStringList* selected_datasources)
@@ -206,7 +208,7 @@ void DataStreamBB::queryLatestVariableValuesFromBB()
  * Adapted from the ropod_com_mediator component:
  * https://git.ropod.org/ropod/communication/ropod_com_mediator/blob/master/src/com_mediator.cpp
  */
-void DataStreamBB::recvMsgCallback(ZyreMsgContent *msgContent)
+void DataStreamBB::zyreMessageReceptionCallback(ZyreMsgContent *msgContent)
 {
 	std::stringstream msg;
 	msg << msgContent->message;
@@ -242,10 +244,12 @@ void DataStreamBB::recvMsgCallback(ZyreMsgContent *msgContent)
                 timestamp_str = timestamp_value_str.substr(0, pos);
                 value_str = timestamp_value_str.substr(pos+2, timestamp_value_str.length());
 
-                float timestamp = std::stof(timestamp_str);
-                float value = std::stof(value_str);
+                double timestamp = std::stod(timestamp_str);
+                double value = std::stod(value_str);
 
-                BBVariableValues[variableName] = value;
+                // Store variable name with timestamp and value:
+                BBVariableData[variableName].first = timestamp;
+                BBVariableData[variableName].second = value;
             }
         }
   	}
@@ -253,11 +257,14 @@ void DataStreamBB::recvMsgCallback(ZyreMsgContent *msgContent)
 
 void DataStreamBB::streamingLoop()
 {
+    // Currently, a frequency of 10 or higher causes some hanging during streaming:
+    double cycle_frequency = 5;
+    
     _running = true;
     while( _running )
     {
         singleCycle();
-        std::this_thread::sleep_for ( std::chrono::milliseconds(100) );
+        std::this_thread::sleep_for (std::chrono::milliseconds((int((1 / cycle_frequency) * 1000))));
     }
 }
 
@@ -268,19 +275,31 @@ void DataStreamBB::singleCycle()
 
     using namespace std::chrono;
     static std::chrono::high_resolution_clock::time_point initial_time = high_resolution_clock::now();
-    const double offset = duration_cast< duration<double>>( initial_time.time_since_epoch() ).count() ;
+    const double offset = duration_cast< duration<double>>( initial_time.time_since_epoch() ).count();
+
+    std::string variableName;
+    double variable_value;
+    double timestamp_difference;
 
     auto now =  high_resolution_clock::now();
     for (auto& it: dataMap().numeric )
     {
-        if( it.first == "empty") continue;
+        variableName = it.first;
+        if (variableName == "empty") continue;
+
+        timestamp_difference = BBVariableData[variableName].first - PreviousBBVariableData[variableName].first;
+        if (timestamp_difference == 0) continue;
 
         auto& plot = it.second;
         const double t = duration_cast< duration<double>>( now - initial_time ).count() ;
-        double variable_value = BBVariableValues.find(it.first)->second;
+        variable_value = BBVariableData[variableName].second;
 
         plot.pushBack( PlotData::Point( t + offset, variable_value ) );
+
+        PreviousBBVariableData[variableName].first = BBVariableData[variableName].first;
+        PreviousBBVariableData[variableName].second = BBVariableData[variableName].second;
     }
+}
 
     // for (auto i = BBVariableValues.begin(); i != BBVariableValues.end(); ++i)
     // {
