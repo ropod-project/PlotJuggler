@@ -72,14 +72,10 @@ bool DataStreamBB::start(QStringList* selected_datasources)
         dataMap().user_defined.clear();
     }
 
-    this->queryVariableListFromBB();
-    std::this_thread::sleep_for ( std::chrono::milliseconds(100) );
-	if (BBVariableList.size() == 0)
-	{
-		QMessageBox::warning(nullptr, "No Black Box Data Received",
-            "Could not connect with the black-box. Please try again.");
+    if (queryVariableListFromBB() != true)
+    {
         return false;
-	}
+    }
 
     std::vector<std::pair<QString,QString>> all_variables;
 
@@ -171,7 +167,7 @@ void DataStreamBB::loadDefaultSettings()
     _config.selected_variables = settings.value("DataStreamBB/default_topics", false ).toStringList();
 }
 
-void DataStreamBB::queryVariableListFromBB()
+bool DataStreamBB::queryVariableListFromBB()
 {
     Json::Value query_msg;
 
@@ -182,6 +178,24 @@ void DataStreamBB::queryVariableListFromBB()
     std::stringstream feedbackMsg("");
     feedbackMsg << query_msg;
     this->shout(feedbackMsg.str(), "ROPOD");
+
+    waiting_for_bb_response = true;
+    auto start_time = std::chrono::steady_clock::now();
+    auto current_time = std::chrono::steady_clock::now();
+
+    while (waiting_for_bb_response)
+    {
+        current_time = std::chrono::steady_clock::now();
+
+        if (std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count() > 2)
+        {
+            QMessageBox::warning(nullptr, "No Black Box Data Received",
+            "Could not connect with the black-box. Please try again.");
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void DataStreamBB::queryLatestVariableValuesFromBB()
@@ -253,6 +267,7 @@ void DataStreamBB::zyreMessageReceptionCallback(ZyreMsgContent *msgContent)
             }
         }
   	}
+    waiting_for_bb_response = false;
 }
 
 void DataStreamBB::streamingLoop()

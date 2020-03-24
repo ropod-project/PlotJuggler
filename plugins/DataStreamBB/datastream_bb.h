@@ -45,7 +45,7 @@ public:
         return DataStreamer::appendData(destination);
     }
 
-    void queryVariableListFromBB();
+    bool queryVariableListFromBB();
 
     void queryLatestVariableValuesFromBB();
 
@@ -63,6 +63,8 @@ private:
     QStringList BBVariableList;
     std::map<std::string, std::pair<double, double>> BBVariableData;
     std::map<std::string, std::pair<double, double>> PreviousBBVariableData;
+
+    bool waiting_for_bb_response = true;
 
     PlotDataMapRef* _destination_data;
 
