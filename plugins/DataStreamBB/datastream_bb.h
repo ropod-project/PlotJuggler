@@ -50,6 +50,7 @@ public:
     void queryLatestVariableValuesFromBB();
 
     void zyreMessageReceptionCallback(ZyreMsgContent *msgContent);
+    void recvMsgCallback(ZyreMsgContent *msgContent);
 
     void initializeDataMap();
 

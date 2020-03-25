@@ -222,7 +222,7 @@ void DataStreamBB::queryLatestVariableValuesFromBB()
  * Adapted from the ropod_com_mediator component:
  * https://git.ropod.org/ropod/communication/ropod_com_mediator/blob/master/src/com_mediator.cpp
  */
-void DataStreamBB::zyreMessageReceptionCallback(ZyreMsgContent *msgContent)
+void DataStreamBB::recvMsgCallback(ZyreMsgContent *msgContent)
 {
 	std::stringstream msg;
 	msg << msgContent->message;
