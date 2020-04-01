@@ -170,6 +170,7 @@ add_subdirectory( plugins/DataLoadCSV )
 add_subdirectory( plugins/DataLoadULog )
 add_subdirectory( plugins/DataStreamSample )
 add_subdirectory( plugins/DataLoadMongoDB )
+add_subdirectory( plugins/DataStreamBB )
 
 if (Qt5Widgets_VERSION VERSION_LESS 5.3.0)
     message(STATUS "Minimum Qt5 version for DataStreamWebSocket plugin is 5.3. Skipping plugins/DataStreamWebSocket")
