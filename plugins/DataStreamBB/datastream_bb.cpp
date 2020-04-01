@@ -12,11 +12,6 @@
 #include <QSettings>
 #include <QFileDialog>
 
-// #include "../ROS/dialog_select_ros_topics.h"
-// #include "../ROS/rule_editing.h"
-// #include "../ROS/qnodedialog.h"
-// #include "../ROS/shape_shifter_factory.hpp"
-
 #include "dialog_select_bb_variables.h"
 
 #include <math.h>
@@ -42,14 +37,9 @@ std::string getEnv(const std::string &var)
 DataStreamBB::DataStreamBB():
     DataStreamer(), 
     ZyreBaseCommunicator(getEnv("ROPOD_ID"), false, "", true, false),
-    _destination_data(nullptr),
-    _prev_clock_time(0)
+    _destination_data(nullptr)
 {
     _running = false;
-    _periodic_timer = new QTimer();
-    // connect( _periodic_timer, &QTimer::timeout,
-    //          this, &DataStreamBB::timerCallback);                        // <-- Removing this seems to have fixed an undefined symbol issue
-
     loadDefaultSettings();
 
     myUUID = this->generateUUID();
@@ -72,17 +62,23 @@ bool DataStreamBB::start(QStringList* selected_datasources)
         dataMap().user_defined.clear();
     }
 
-    if (queryVariableListFromBB() != true)
+    if (!queryVariableListFromBB()) return false;
+
+    if (BBVariableList.size() == 0)
     {
+        QMessageBox::warning(nullptr, "No Black Box Data Received",
+        "Could not receive a variable list from the black box. Try again.");
         return false;
     }
 
     std::vector<std::pair<QString,QString>> all_variables;
 
-    for(auto variable_name : BBVariableList)
+    for(auto variableName : BBVariableList)
     {
-        all_variables.push_back(std::make_pair(variable_name, QString("dummy type") ) );
+        all_variables.push_back(std::make_pair(variableName, QString("dummy type") ) );
     }
+
+    BBVariableList.clear();
 
     QTimer timer;
     timer.setSingleShot(false);
@@ -93,11 +89,6 @@ bool DataStreamBB::start(QStringList* selected_datasources)
 
     connect( &timer, &QTimer::timeout, [&]()
     {
-        all_variables.clear();
-        for(auto variable_name : BBVariableList)
-        {
-            all_variables.push_back(std::make_pair(variable_name, QString("dummy type")));
-        }
         dialog.updateVariableList(all_variables);
     });
 
@@ -112,14 +103,14 @@ bool DataStreamBB::start(QStringList* selected_datasources)
         return false;
     }
 
-    initializeDataMap();
+    if (!initializeDataMap()) return false;
+    instantiateVariableThreads();
+
+    _queryThread = std::thread([this](){ this->queryingLoop();} );
 
     _running = true;
 
-    _periodic_timer->setInterval(500);
-    _periodic_timer->start();
-
-    _thread = std::thread([this](){ this->streamingLoop();} );
+    _initialTime = std::chrono::high_resolution_clock::now();
 
     return true;
 }
@@ -128,18 +119,17 @@ bool DataStreamBB::isRunning() const { return _running; }
 
 void DataStreamBB::shutdown()
 {
-    _periodic_timer->stop();
     _running = false;
 
-    if( _thread.joinable()) 
-    {
-        _thread.join();
-    }
+    if( _queryThread.joinable()) _queryThread.join();
+
+    for (auto& thread: variableThreads) if(thread.joinable()) thread.join();
 }
 
 DataStreamBB::~DataStreamBB()
 {
     shutdown();
+    emit connectionClosed();
 }
 
 bool DataStreamBB::xmlSaveState(QDomDocument &doc, QDomElement &plugin_elem) const
@@ -158,7 +148,6 @@ void DataStreamBB::saveDefaultSettings()
 
     settings.setValue("DataStreamBB/default_topics", _config.selected_variables);
 }
-
 
 void DataStreamBB::loadDefaultSettings()
 {
@@ -179,17 +168,15 @@ bool DataStreamBB::queryVariableListFromBB()
     feedbackMsg << query_msg;
     this->shout(feedbackMsg.str(), "ROPOD");
 
-    waiting_for_bb_response = true;
     auto start_time = std::chrono::steady_clock::now();
-    auto current_time = std::chrono::steady_clock::now();
+    int queryTimeOut = 2;
+    _waitingForBBResponse = true;
 
-    while (waiting_for_bb_response)
+    while (_waitingForBBResponse)
     {
-        current_time = std::chrono::steady_clock::now();
-
-        if (std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count() > 2)
+        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count() > queryTimeOut)
         {
-            QMessageBox::warning(nullptr, "No Black Box Data Received",
+            QMessageBox::warning(nullptr, "No Black Box Response",
             "Could not connect with the black-box. Please try again.");
             return false;
         }
@@ -198,15 +185,51 @@ bool DataStreamBB::queryVariableListFromBB()
     return true;
 }
 
-void DataStreamBB::queryLatestVariableValuesFromBB()
+bool DataStreamBB::queryLatestVariableValuesFromBB()
 {
     Json::Value query_msg;
     Json::Value variable_list;
 
     query_msg["header"]["type"] = "LATEST-DATA-QUERY";
+    query_msg["header"]["msgId"] = this->generateUUID();
     query_msg["payload"]["blackBoxId"] = "black_box_001";
     query_msg["payload"]["senderId"] = this->myUUID;
+
+    for (auto variable : _config.selected_variables)
+        variable_list.append(variable.toStdString());
+
+    query_msg["payload"]["variables"] = variable_list;
+
+    std::stringstream feedbackMsg("");
+    feedbackMsg << query_msg;
+    this->shout(feedbackMsg.str(), "ROPOD");
+
+    auto start_time = std::chrono::steady_clock::now();
+    int queryTimeOut = 2;
+    _waitingForBBResponse = true;
+
+    while (_waitingForBBResponse)
+    {
+        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count() > queryTimeOut)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void DataStreamBB::queryVariableValuesFromBB()
+{
+    Json::Value query_msg;
+    Json::Value variable_list;
+
+    query_msg["header"]["type"] = "DATA-QUERY";
     query_msg["header"]["msgId"] = this->generateUUID();
+    query_msg["payload"]["blackBoxId"] = "black_box_001";
+    query_msg["payload"]["senderId"] = this->myUUID;
+    query_msg["payload"]["startTime"] = this->_latestTimestamp;
+    query_msg["payload"]["endTime"] = "-1";
 
     for (auto variable : _config.selected_variables)
         variable_list.append(variable.toStdString());
@@ -229,7 +252,7 @@ void DataStreamBB::recvMsgCallback(ZyreMsgContent *msgContent)
 	
 	Json::Value root;
 	std::string errors;
-	bool ok = Json::parseFromStream(json_builder, msg, &root, &errors);
+	bool ok = Json::parseFromStream(jsonBuilder, msg, &root, &errors);
 
 	if (root["payload"]["receiverId"] == this->myUUID)
 	{
@@ -262,81 +285,140 @@ void DataStreamBB::recvMsgCallback(ZyreMsgContent *msgContent)
                 double value = std::stod(value_str);
 
                 // Store variable name with timestamp and value:
-                BBVariableData[variableName].first = timestamp;
-                BBVariableData[variableName].second = value;
+                LatestBBVariableData[variableName].first = timestamp;
+                LatestBBVariableData[variableName].second = value;
+                
+                _latestTimestamp = timestamp;
+            }
+        }
+        else if (root["header"]["type"] == "DATA-QUERY")
+        {
+            std::string timestamp_value_str;
+            std::string timestamp_str;
+            std::string value_str;
+
+            for (auto variableName : root["payload"]["dataList"].getMemberNames())
+            {
+                for (auto variableData : root["payload"]["dataList"][variableName])
+                {
+                    timestamp_value_str = variableData.asString();
+                    timestamp_value_str = timestamp_value_str.substr(1, timestamp_value_str.length() - 2);
+
+                    size_t pos = timestamp_value_str.find(",");
+                    timestamp_str = timestamp_value_str.substr(0, pos);
+                    value_str = timestamp_value_str.substr(pos+2, timestamp_value_str.length());
+
+                    double timestamp = std::stod(timestamp_str);
+                    double value = std::stod(value_str);
+                    
+                    BBVariableDataMulti[variableName].push_back(std::pair<double, double>(timestamp, value));
+
+                    _latestTimestamp = timestamp;
+                }
             }
         }
   	}
-    waiting_for_bb_response = false;
+    _waitingForBBResponse = false;
 }
 
-void DataStreamBB::streamingLoop()
+void DataStreamBB::streamingLoop(std::string variableName)
 {
-    // Currently, a frequency of 10 or higher causes some hanging during streaming:
-    double cycle_frequency = 5;
-    
     _running = true;
     while( _running )
     {
-        singleCycle();
-        std::this_thread::sleep_for (std::chrono::milliseconds((int((1 / cycle_frequency) * 1000))));
+        multiMeasurementSingleCycle(variableName);
     }
 }
 
-void DataStreamBB::singleCycle()
+void DataStreamBB::queryingLoop()
+{
+    double querying_frequency = 1;
+    
+    while( _running )
+    {
+        queryVariableValuesFromBB();
+        std::this_thread::sleep_for (std::chrono::milliseconds((int((1 / querying_frequency) * 1000))));
+    }
+}
+
+void DataStreamBB::multiMeasurementSingleCycle(std::string variableName)
+{
+    using namespace std::chrono;
+
+    if (BBVariableDataMulti[variableName].size() == 0) return;
+
+    double latest_data_timestamp = BBVariableDataMulti[variableName].back().first;
+    double latest_previous_data_timestamp = LatestBBVariableData[variableName].first;
+
+    // Note: Sending consecutive data queries where startTime is the latestTimeStamp
+    // results in the first entry often being a duplicate of the last of the previous
+    // query. However, the next condition filters out such duplicates.
+    if (latest_data_timestamp - latest_previous_data_timestamp == 0) return;
+
+    double variable_value;
+    double variable_timestamp;
+
+    while (BBVariableDataMulti[variableName].size() != 0)
+    {
+        auto& plot = dataMap().numeric.find(variableName)->second;
+        const double t = duration_cast< duration<double>>( high_resolution_clock::now() - _initialTime ).count();
+
+        auto variable_data = BBVariableDataMulti[variableName].front();
+        variable_timestamp = variable_data.first;
+        variable_value = variable_data.second;
+        // std::cout << "Timestamp: " << variable_timestamp << std::endl;
+        // std::cout << "Value: " << variable_value << std::endl << std::endl;
+
+        plot.pushBack( PlotData::Point( t, variable_value ) );
+
+        LatestBBVariableData[variableName] = variable_data;
+        BBVariableDataMulti[variableName].pop_front();
+        
+        if (BBVariableDataMulti[variableName].size() != 0)
+        {
+            double next_measurement_timestamp = BBVariableDataMulti[variableName].front().first;
+            double time_to_next_measurement = next_measurement_timestamp - variable_timestamp;
+            
+            std::this_thread::sleep_for(milliseconds((int(time_to_next_measurement * 1000))));
+        }
+    }
+}
+
+void DataStreamBB::instantiateVariableThreads()
+{
+    std::string variableName;
+    for (auto variableNameQString : _config.selected_variables)
+    {
+        variableName = variableNameQString.toStdString();
+
+        // std::cout << "Initialized thread for variable: " << variableName << std::endl;
+        std::thread variable_thread = std::thread([this, variableName](){ this->streamingLoop(variableName);} );
+        variableThreads.push_back(std::move(variable_thread));
+    }
+}
+
+bool DataStreamBB::initializeDataMap()
 {
     std::lock_guard<std::mutex> lock( mutex() );
-    queryLatestVariableValuesFromBB();
-
-    using namespace std::chrono;
-    static std::chrono::high_resolution_clock::time_point initial_time = high_resolution_clock::now();
-    const double offset = duration_cast< duration<double>>( initial_time.time_since_epoch() ).count();
 
     std::string variableName;
-    double variable_value;
-    double timestamp_difference;
-
-    auto now =  high_resolution_clock::now();
-    for (auto& it: dataMap().numeric )
+    for (auto variableNameQString : _config.selected_variables)
     {
-        variableName = it.first;
-        if (variableName == "empty") continue;
+        variableName = variableNameQString.toStdString();
 
-        timestamp_difference = BBVariableData[variableName].first - PreviousBBVariableData[variableName].first;
-        if (timestamp_difference == 0) continue;
-
-        auto& plot = it.second;
-        const double t = duration_cast< duration<double>>( now - initial_time ).count() ;
-        variable_value = BBVariableData[variableName].second;
-
-        plot.pushBack( PlotData::Point( t + offset, variable_value ) );
-
-        PreviousBBVariableData[variableName].first = BBVariableData[variableName].first;
-        PreviousBBVariableData[variableName].second = BBVariableData[variableName].second;
-    }
-}
-
-    // for (auto i = BBVariableValues.begin(); i != BBVariableValues.end(); ++i)
-    // {
-    //     std::cout << "Variable: " << i->first << ", Value: " << BBVariableValues.find(i->first)->second << std::endl;
-    // }
-}
-
-void DataStreamBB::initializeDataMap()
-{
-    std::string variable_name;
-    for (auto i = _config.selected_variables.begin(); i != _config.selected_variables.end(); ++i)
-    {
-        QString qstring = *i;
-        variable_name = qstring.toStdString();
-
+		auto plot_pair = dataMap().addNumeric( variableName );
 		PlotData::Point data_point;
 
-		auto plot_pair = dataMap().addNumeric( variable_name );
-		
-		PlotData& plot_raw = plot_pair->second;
-		plot_raw.pushBack( data_point );
+		plot_pair->second.pushBack( data_point );
     }
 
-    singleCycle();
+    bool latestDataQuerySuccess = queryLatestVariableValuesFromBB();
+
+    if (!latestDataQuerySuccess)
+    {
+        QMessageBox::warning(nullptr, "Failed to Initialize Data Map",
+            "Did not receive initial data values from black-box. Aborting...");
+    }
+
+    return latestDataQuerySuccess;
 }

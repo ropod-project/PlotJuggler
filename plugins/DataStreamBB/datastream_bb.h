@@ -31,7 +31,7 @@ public:
 
     virtual ~DataStreamBB() override;
 
-    virtual const char* name() const override { return "Black-Box Streamer";  }
+    virtual const char* name() const override { return "Black Box Streamer";  }
 
     virtual bool xmlSaveState(QDomDocument &doc, QDomElement &parent_element) const override;
 
@@ -46,45 +46,44 @@ public:
     }
 
     bool queryVariableListFromBB();
+    bool queryLatestVariableValuesFromBB();
+    void queryVariableValuesFromBB();
 
-    void queryLatestVariableValuesFromBB();
-
-    void zyreMessageReceptionCallback(ZyreMsgContent *msgContent);
     void recvMsgCallback(ZyreMsgContent *msgContent);
 
-    void initializeDataMap();
+    bool initializeDataMap();
+    void instantiateVariableThreads();
 
-    void streamingLoop();
+    void streamingLoop(std::string variableName);
+    void queryingLoop();
 
-    void singleCycle();
+    void multiMeasurementSingleCycle(std::string variableName);
 
 private:
-    Json::CharReaderBuilder json_builder;
+    Json::CharReaderBuilder jsonBuilder;
     std::string myUUID;
-    QStringList BBVariableList;
-    std::map<std::string, std::pair<double, double>> BBVariableData;
-    std::map<std::string, std::pair<double, double>> PreviousBBVariableData;
 
-    bool waiting_for_bb_response = true;
+    QStringList BBVariableList;
+    std::map<std::string, std::deque<std::pair<double, double>>> BBVariableDataMulti;
+    std::map<std::string, std::pair<double, double>> LatestBBVariableData;
+
+    std::chrono::high_resolution_clock::time_point _initialTime;
+
+    bool _running;
+    bool _waitingForBBResponse;
+    double _latestTimestamp;
 
     PlotDataMapRef* _destination_data;
 
     std::thread _thread;
-
-    bool _running;
-
-    double _initial_time;
+    std::thread _queryThread;
+    std::vector<std::thread> variableThreads;
 
     DialogSelectBBVariables::Configuration _config;
-
-    QTimer* _periodic_timer;
-
-    double _prev_clock_time;
 
     void saveDefaultSettings();
 
     void loadDefaultSettings();
-
 };
 
 #endif // DATASTREAM_BB_TOPIC_H
